@@ -1,4 +1,5 @@
 {
+  "app": {
     "posts": {
       "101": {
         "title": "Introduction to the Thesis of Theseus",
@@ -26,3 +27,4 @@
       }
     }
   }
+}
