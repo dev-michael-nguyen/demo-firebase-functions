@@ -1,19 +1,39 @@
-// Using Firebase Admin SDK to access the Firebase Realtime Database. 
-const admin = require('firebase-admin');
+// Using Firebase Admin SDK to access the Firebase Realtime Database.
 const functions = require('firebase-functions');
+const admin = require('firebase-admin');
 admin.initializeApp(functions.config().firebase);
+const db = admin.database();
 
 // Using Express App for routing
 const express = require('express');
 const app = express();
 
-// Enable CORS on app
+// Enable CORS on app request
 const cors = require('cors')({origin: true});
 app.use(cors);
+
+// Middleware for request authentication
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-  next();
+  // Set CORS on our response
+  // Enable and test this if we have problem with CORS on codepen
+  // res.header("Access-Control-Allow-Origin", "*");
+  // res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+
+  if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) {
+    res.status(403).send('Unauthorized: No authorization header.');
+    return;
+  }
+
+  const idToken = req.headers.authorization.split('Bearer ')[1];
+  admin.auth().verifyIdToken(idToken)
+    .then((decodedUser) => {
+      req.user = decodedUser;
+      return next();
+    })
+    .catch((error) => {
+      console.error(error);
+      res.status(403).send('Unauthorized: ' + error.message);
+    });
 });
 
 app.get(
@@ -22,7 +42,7 @@ app.get(
     // once() is a database action that triggers data retrieval one time. In our code, we want the value event. 
     // The value event is sent every time data is changed at or below the reference specified in the ref() call. 
     // Because every data change will trigger the value event, use it sparingly.
-    return admin.database()
+    return db
       .ref(req.fullPath)
       .once('value')
       .then((snapshot) => {
