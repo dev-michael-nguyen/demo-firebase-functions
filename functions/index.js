@@ -1,4 +1,6 @@
-// Using Firebase Admin SDK to access the Firebase Realtime Database.
+// Using Firebase Admin SDK to access Firebase Realtime Database.
+// NOTE: It will be initialized with default admin privilege and bypass database rule.
+//       Config with service account as needed: https://firebase.google.com/docs/admin/setup?authuser=0
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp(functions.config().firebase);
@@ -12,8 +14,7 @@ const app = express();
 const cors = require('cors')({origin: true});
 app.use(cors);
 
-// For sanitizing POST request
-const sanitizeHtml = require('sanitize-html');
+// Res status cheatsheet
 const resStatus = {
   OK: 200,
   CREATED: 201,
@@ -23,19 +24,18 @@ const resStatus = {
   SERVER_ERROR: 500
 };
 
-// Middleware for request authentication
-app.use((req, res, next) => {
-  // Set CORS on our response
+// Use on route that need to be authenticated
+const authenticate = (req, res, next) => {
+  // Set CORS our POST response so it worked on codepen
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
 
   if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) {
-    res.status(resStatus.UNAUTHORIZED).json({ error: `${resStatus.UNAUTHORIZED}: No authorization header.`});
-    return;
+    return res.status(resStatus.UNAUTHORIZED).json({ error: `${resStatus.UNAUTHORIZED}: No authorization header.`});
   }
 
   const idToken = req.headers.authorization.split('Bearer ')[1];
-  admin.auth().verifyIdToken(idToken)
+  return admin.auth().verifyIdToken(idToken)
     .then((decodedUser) => {
       req.user = decodedUser;
       return next();
@@ -44,13 +44,13 @@ app.use((req, res, next) => {
       console.error(error);
       return res.status(resStatus.UNAUTHORIZED).json({ error: `${resStatus.UNAUTHORIZED}: ${error.message}`});
     });
-});
+};
 
+// Public route
 app.get(
-  ['/posts/', '/posts/:id'], 
+  ['/posts/', '/posts/:id'],
   (req, res) => {
     return db.ref(req.fullPath)
-      .orderByChild('created')
       .once('value')
       .then((snapshot) => {
         const data = snapshot.val();
@@ -63,8 +63,12 @@ app.get(
   }
 );
 
+// For sanitizing POST request
+const sanitizeHtml = require('sanitize-html');
+// Protected route
 app.post(
   ['/posts/'],
+  authenticate,
   (req, res) => {
     const content = req.body.content ? sanitizeHtml(req.body.content) : null;
     const title = req.body.title ? sanitizeHtml(req.body.title) : null;
@@ -83,7 +87,8 @@ app.post(
     }
 
     return db.ref(req.fullPath)
-      .push(newPost) // push return https://firebase.google.com/docs/reference/node/firebase.database.ThenableReference
+      // push return https://firebase.google.com/docs/reference/node/firebase.database.ThenableReference
+      .push(newPost) 
       .then((dbRef) => {
         return dbRef.ref.once('value');
       })
@@ -99,15 +104,18 @@ app.post(
   }
 );
 
-// Set the routes up under the /app endpoint
+// Set routes under 'app' function base url which is /app
+// Set up Firebase Realtime Database base url to /app for easy integration
 exports.app = functions.https.onRequest((req, res) => {
-  // Handle routing of /app without a trailing /
+  // Fix routing for empty req path
   if (!req.path) {
     req.url = `/${req.url}`;
   }
 
-  // Save the full path so we can use them for firebase database ref
-  req.fullPath = `app${req.url}`;
+  // Save the full path so we can use them for Firebase Realtime Database ref
+  // NOTE: If database baseUrl is not the same as our function then config it here
+  const dbBaseUrl = 'app';
+  req.fullPath = `${dbBaseUrl}${req.url}`;
 
   return app(req, res);
 });
