@@ -12,15 +12,25 @@ const app = express();
 const cors = require('cors')({origin: true});
 app.use(cors);
 
+// For sanitizing POST request
+const sanitizeHtml = require('sanitize-html');
+const resStatus = {
+  OK: 200,
+  CREATED: 201,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 403,
+  NOT_FOUND: 404,
+  SERVER_ERROR: 500
+};
+
 // Middleware for request authentication
 app.use((req, res, next) => {
   // Set CORS on our response
-  // Enable and test this if we have problem with CORS on codepen
-  // res.header("Access-Control-Allow-Origin", "*");
-  // res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
 
   if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) {
-    res.status(403).send('Unauthorized: No authorization header.');
+    res.status(resStatus.UNAUTHORIZED).json({ error: `${resStatus.UNAUTHORIZED}: No authorization header.`});
     return;
   }
 
@@ -32,29 +42,66 @@ app.use((req, res, next) => {
     })
     .catch((error) => {
       console.error(error);
-      res.status(403).send('Unauthorized: ' + error.message);
+      return res.status(resStatus.UNAUTHORIZED).json({ error: `${resStatus.UNAUTHORIZED}: ${error.message}`});
     });
 });
 
 app.get(
   ['/posts/', '/posts/:id'], 
   (req, res) => {
-    // once() is a database action that triggers data retrieval one time. In our code, we want the value event. 
-    // The value event is sent every time data is changed at or below the reference specified in the ref() call. 
-    // Because every data change will trigger the value event, use it sparingly.
-    return db
-      .ref(req.fullPath)
+    return db.ref(req.fullPath)
+      .orderByChild('created')
       .once('value')
       .then((snapshot) => {
-        const response = Object.assign({}, snapshot.val());
-        return res.status(200).send(response);
+        const data = snapshot.val();
+        return res.status(resStatus.OK).json(data);
+      })
+      .catch((error) => {
+        console.error(error);
+        return res.status(resStatus.SERVER_ERROR).json({ error: `${error.code}: ${error.message}`});
       });
   }
 );
 
-// Set the routes up under the /posts endpoint
+app.post(
+  ['/posts/'],
+  (req, res) => {
+    const content = req.body.content ? sanitizeHtml(req.body.content) : null;
+    const title = req.body.title ? sanitizeHtml(req.body.title) : null;
+    if (content === null || title === null) {
+      return res.status(resStatus.BAD_REQUEST).json({ error: `${resStatus.BAD_REQUEST}: Invalid content or title`});
+    }
+
+    const newPost = {
+      author: {
+        uid: req.user.uid,
+        name: req.user.name,
+      },
+      title: title,
+      content: content,
+      created: admin.database.ServerValue.TIMESTAMP
+    }
+
+    return db.ref(req.fullPath)
+      .push(newPost) // push return https://firebase.google.com/docs/reference/node/firebase.database.ThenableReference
+      .then((dbRef) => {
+        return dbRef.ref.once('value');
+      })
+      .then((snapshot) => {
+        const data = snapshot.val();
+        data.key = snapshot.key;
+        return res.status(resStatus.CREATED).json(data);
+      })
+      .catch((error) => {
+        console.error(error);
+        return res.status(resStatus.SERVER_ERROR).json({ error: `${error.code}: ${error.message}`});
+      });
+  }
+);
+
+// Set the routes up under the /app endpoint
 exports.app = functions.https.onRequest((req, res) => {
-  // Handle routing of /posts without a trailing /
+  // Handle routing of /app without a trailing /
   if (!req.path) {
     req.url = `/${req.url}`;
   }
