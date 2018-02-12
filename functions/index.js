@@ -79,7 +79,6 @@ app.post(
     const newPost = {
       author: {
         uid: req.user.uid,
-        name: req.user.name,
       },
       title: title,
       content: content,
