@@ -63,9 +63,8 @@ app.get(
   }
 );
 
-// For sanitizing POST request
-const sanitizeHtml = require('sanitize-html');
 // Protected route
+const sanitizeHtml = require('sanitize-html'); // For sanitizing POST request
 app.post(
   ['/posts/'],
   authenticate,
@@ -76,7 +75,7 @@ app.post(
       return res.status(resStatus.BAD_REQUEST).json({ error: `${resStatus.BAD_REQUEST}: Invalid content or title`});
     }
 
-    const newPost = {
+    const postData = {
       author: {
         uid: req.user.uid,
       },
@@ -87,7 +86,7 @@ app.post(
 
     return db.ref(req.fullPath)
       // push return https://firebase.google.com/docs/reference/node/firebase.database.ThenableReference
-      .push(newPost) 
+      .push(postData) 
       .then((dbRef) => {
         return dbRef.ref.once('value');
       })
@@ -95,6 +94,34 @@ app.post(
         const data = snapshot.val();
         data.key = snapshot.key;
         return res.status(resStatus.CREATED).json(data);
+      })
+      .catch((error) => {
+        console.error(error);
+        return res.status(resStatus.SERVER_ERROR).json({ error: `${error.code}: ${error.message}`});
+      });
+  }
+);
+
+app.put(
+  ['/posts/:id'],
+  authenticate,
+  (req, res) => {
+    const content = req.body.content ? sanitizeHtml(req.body.content) : null;
+    const title = req.body.title ? sanitizeHtml(req.body.title) : null;
+    if (content === null || title === null) {
+      return res.status(resStatus.BAD_REQUEST).json({ error: `${resStatus.BAD_REQUEST}: Invalid content or title`});
+    }
+
+    const putData = {
+      title: title,
+      content: content,
+    }
+
+    return db.ref(req.fullPath)
+      .update(putData)
+      .then((snapshot) => {
+        const data = snapshot.val();
+        return res.status(resStatus.OK).json(data);
       })
       .catch((error) => {
         console.error(error);
